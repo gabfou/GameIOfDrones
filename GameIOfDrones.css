@@ -2,7 +2,9 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <iterator>
 #include <math.h>
+#include <map>
 
 using namespace std;
 
@@ -92,6 +94,7 @@ class Zone
 private:
 
     int aproaching = 0;
+    multimap<int, Drone*> mapDroneByDist;
 
 public:
 
@@ -144,27 +147,43 @@ public:
         cerr << id <<" " <<renfortneeded <<endl;
     }
     
+    int setNearestDrone(int nb) // 
+    {
+        mapDroneByDist.clear();
+        for(Drone &d : drone[ID])
+        {   
+            if (d.getReserved() == false)
+                mapDroneByDist.insert(pair<int, Drone*>(pos.Distance(d.pos), &d));
+        }
+        return next(mapDroneByDist.begin(), nb)->first; // return the max distance
+    }
+    
     bool EvaluateMove()
     {
         if (moveMade)
             return false;
-        moveValue = D - renfortneeded;
+            
+        setNearestDrone(renfortneeded);
+            
+        moveValue = FREEDRONE - renfortneeded;
         return moveValue >= 0;
     }
     
     bool MakeMove()
     {
-        for(Drone &d : drone[ID])
+        for (multimap<int, Drone*>::iterator p = mapDroneByDist.begin(); p != mapDroneByDist.end(); ++p)
         {
+            Drone *d = p->second;
             if (aproaching >= renfortneeded)
                 break ;
-            if (d.getReserved() == false)
+            if (d->getReserved() == false)
             {
                 aproaching++;
-                d.target = pos;
-                d.setReservedToTrue();
+                d->target = pos;
+                d->setReservedToTrue();
             }
         }
+        FREEDRONE -= aproaching;
         cerr << "id: " << id << " approching: " << aproaching << " needed: " << renfortneeded <<endl; 
         moveMade = true;
         moveValue = -1;
