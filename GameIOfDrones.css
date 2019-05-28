@@ -2,26 +2,177 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <math.h>
 
 using namespace std;
 
-class Zone
+
+    int P; // number of players in the game (2 to 4 players)
+    int ID; // ID of your player (0, 1, 2, or 3)
+    int D; // number of drones in each team (3 to 11)
+    int Z; // number of zones on the map (4 to 8)
+    int FREEDRONE; // number of free allied drone
+
+
+
+class Vector2
 {
 public:
     int x;
     int y;
+    
+    Vector2(int xValue, int yValue) : x(xValue), y(yValue){}
+    
+    int Distance(const Vector2 & v) const {return sqrt(((x - v.x) * (x - v.x)) + ((y - v.y) * (y - v.y))); }
+    
+    //ASSINGMENT AND EQUALITY OPERATIONS
+    inline Vector2 & operator = (const Vector2 & v) { x = v.x; y = v.y; return *this; }
+    inline Vector2 & operator = (const int & f) { x = f; y = f; return *this; }
+    inline Vector2 & operator - (void) { x = -x; y = -y; return *this; }
+    inline bool operator == (const Vector2 & v) const { return (x == v.x) && (y == v.y); }
+    inline bool operator != (const Vector2 & v) const { return (x != v.x) || (y != v.y); }
+    
+    //VECTOR2 TO VECTOR2 OPERATIONS
+    inline const Vector2 operator + (const Vector2 & v) const { return Vector2(x + v.x, y + v.y); }
+    inline const Vector2 operator - (const Vector2 & v) const { return Vector2(x - v.x, y - v.y); }
+    inline const Vector2 operator * (const Vector2 & v) const { return Vector2(x * v.x, y * v.y); }
+    inline const Vector2 operator / (const Vector2 & v) const { return Vector2(x / v.x, y / v.y); }
+    
+    //VECTOR2 TO THIS OPERATIONS
+    inline Vector2 & operator += (const Vector2 & v) { x += v.x; y += v.y; return *this; }
+    inline Vector2 & operator -= (const Vector2 & v) { x -= v.x; y -= v.y; return *this; }
+    inline Vector2 & operator *= (const Vector2 & v) { x *= v.x; y *= v.y; return *this; }
+    inline Vector2 & operator /= (const Vector2 & v) { x /= v.x; y /= v.y; return *this; }
+    
+    //SCALER TO VECTOR2 OPERATIONS
+    inline const Vector2 operator + (int v) const { return Vector2(x + v, y + v); }
+    inline const Vector2 operator - (int v) const { return Vector2(x - v, y - v); }
+    inline const Vector2 operator * (int v) const { return Vector2(x * v, y * v); }
+    inline const Vector2 operator / (int v) const { return Vector2(x / v, y / v); }
+    
+    //SCALER TO THIS OPERATIONS
+    inline Vector2 & operator += (int v) { x += v; y += v; return *this; }
+    inline Vector2 & operator -= (int v) { x -= v; y -= v; return *this; }
+    inline Vector2 & operator *= (int v) { x *= v; y *= v; return *this; }
+    inline Vector2 & operator /= (int v) { x /= v; y /= v; return *this; }
+};
+
+
+class Drone
+{
+private:
+    bool reserved = false;
+    
+public:
+    Vector2 pos;
+    int teamId = -1;
+    Vector2 target = Vector2(0,0);
+    
+    bool getReserved(){return reserved;}
+    void setReservedToTrue(){if (reserved) return; reserved = true;FREEDRONE--;}
+    
+
+    Drone(int teamIdValue) : pos(0, 0), teamId(teamIdValue){}    
+    Drone(int xValue, int yValue, int teamIdValue) : pos(xValue, yValue){}
+    
+    void ReInit(Vector2 newPos) // each turn
+    {
+        pos = newPos;
+        target = pos;
+        reserved = false;
+    }
+
+
+};
+
+vector<Drone> drone[4];
+
+class Zone
+{
+private:
+
+    int aproaching = 0;
+
+public:
+
+    Vector2 pos;
 
     int id = -1;
     
+    vector<int> nbOfDroneByTeamId = {0,0,0,0};
+    int renfortneeded = -1;
+    float moveValue = -1;
+    bool moveMade = false;
+    
 
-    Zone(int xValue, int yValue) : x(xValue), y(yValue){}
+    Zone(int xValue, int yValue) : pos(xValue, yValue){}
     
     string debug()
     {
-        return "id = " + to_string(id) + " x = " + to_string(x) + " y = " + to_string(y); 
+        return "id = " + to_string(id) + " x = " + to_string(pos.x) + " y = " + to_string(pos.y); 
     }
+    
+    void ReInit(int tid) // each turn
+    {
+        moveMade = false;
+        aproaching = 0;
+        moveValue = -1;
+        nbOfDroneByTeamId = {0,0,0,0};
+        id = tid;
+    }
+    
+    bool checkIfDroneIn(int id, Vector2 dronePos)
+    {
+        if (pos.Distance(dronePos) <= 100)
+        {
+            nbOfDroneByTeamId[id]++;
+            return true;
+        }
+        return false;
+    }
+    
+    void updateForceEquilibrium()
+    {
+        int max = 0;
+        
+        for(int i = 0; i < 4; i++)
+        {
+            if (i != ID && nbOfDroneByTeamId[i] > max)
+                max = nbOfDroneByTeamId[i];
+        }
+        renfortneeded =  max + ((id == ID) ? 0 : 1);
+        cerr << id <<" " <<renfortneeded <<endl;
+    }
+    
+    bool EvaluateMove()
+    {
+        if (moveMade)
+            return false;
+        moveValue = D - renfortneeded;
+        return moveValue >= 0;
+    }
+    
+    bool MakeMove()
+    {
+        for(Drone &d : drone[ID])
+        {
+            if (aproaching >= renfortneeded)
+                break ;
+            if (d.getReserved() == false)
+            {
+                aproaching++;
+                d.target = pos;
+                d.setReservedToTrue();
+            }
+        }
+        cerr << "id: " << id << " approching: " << aproaching << " needed: " << renfortneeded <<endl; 
+        moveMade = true;
+        moveValue = -1;
+    }
+    
 };
 
+vector<Zone> zone;
 
 /**
  * Auto-generated code below aims at helping you parse
@@ -30,12 +181,7 @@ public:
 
 int main()
 {
-    vector<Zone> zone;
     
-    int P; // number of players in the game (2 to 4 players)
-    int ID; // ID of your player (0, 1, 2, or 3)
-    int D; // number of drones in each team (3 to 11)
-    int Z; // number of zones on the map (4 to 8)
     cin >> P >> ID >> D >> Z; cin.ignore();
     for (int i = 0; i < Z; i++) {
         int X; // corresponds to the position of the center of a zone. A zone is a circle with a radius of 100 units.
@@ -44,29 +190,77 @@ int main()
         cin >> X >> Y; cin.ignore();
         zone.push_back(Zone(X,Y));
     }
-
+    for (int i = 0; i < P; i++)
+    {
+        for (int j = 0; j < D; j++)
+        {
+            drone[i].push_back(Drone(i));
+        }
+    }
+    
     // game loop
     while (1) {
-        for (int i = 0; i < Z; i++) {
+        
+        FREEDRONE = D;
+        
+        for (int i = 0; i < Z; i++) // init zone
+        {
             int TID; // ID of the team controlling the zone (0, 1, 2, or 3) or -1 if it is not controlled. The zones are given in the same order as in the initialization.
             cin >> TID; cin.ignore();
-            zone[i].id = TID;
+            zone[i].ReInit(TID);
+           
         }
-        for (int i = 0; i < P; i++) {
-            for (int j = 0; j < D; j++) {
+        
+        for (int i = 0; i < P; i++) // init drone and update zone control
+        {
+            for (int j = 0; j < D; j++)
+            {
                 int DX; // The first D lines contain the coordinates of drones of a player with the ID 0, the following D lines those of the drones of player 1, and thus it continues until the last player.
                 int DY;
                 cin >> DX >> DY; cin.ignore();
+                drone[i][j].ReInit(Vector2(DX, DY));
+                for(Zone &z : zone) // zone update drone in zone
+                {
+                    if (z.checkIfDroneIn(i, Vector2(DX, DY)))
+                        break;
+                }
             }
         }
-        for (int i = 0; i < D; i++) {
-
-            // Write an action using cout. DON'T FORGET THE "<< endl"
-            // To debug: cerr << "Debug messages..." << endl;
-
+        
+        for(Zone &z : zone) // zone upadate equilibrium
+            z.updateForceEquilibrium();
+            
+        bool moveLeft = true;
+        
+                for(Zone &z : zone) // zone upadate equilibrium
+            cerr << z.renfortneeded;
+        
+        while(moveLeft) // evaluate ans prepare move
+        {
+            moveLeft = false;
+            Zone *bestZone = NULL;
+            for(Zone &z : zone)
+            {
+                if (z.EvaluateMove())
+                {
+                    moveLeft = true;
+                    if (!bestZone || z.moveValue > bestZone->moveValue)
+                        bestZone = &z;
+                }
+            }
+            if (bestZone)
+                bestZone->MakeMove();
+        }
+            
+        
+            
+        for (int i = 0; i < D; i++) // moving drone
+        {
+            
+            Vector2 target = drone[ID][i].target;
 
             // output a destination point to be reached by one of your drones. The first line corresponds to the first of your drones that you were provided as input, the next to the second, etc.
-            cout << to_string(zone[i % Z].x) << " " << to_string(zone[i % Z].y) << endl;
+            cout << to_string(target.x) << " " << to_string(target.y) << endl;
         }
     }
 }
