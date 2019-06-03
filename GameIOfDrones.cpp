@@ -10,6 +10,7 @@
 #include <queue> 
 #include <limits>
 #include <list>;
+#include <chrono>
 
 using namespace std;
 
@@ -20,9 +21,7 @@ int D; // number of drones in each team (3 to 11)
 int Z; // number of zones on the map (4 to 8)
 int FREEDRONE; // number of free allied drone
 
-
-
-
+chrono::time_point<std::chrono::steady_clock> maxTime; // the time before you have too end the turn
 
 class Vector2
 {
@@ -33,6 +32,7 @@ public:
     Vector2(int xValue, int yValue) : x(xValue), y(yValue){}
     
     int Distance(const Vector2 & v) const {return sqrt(((x - v.x) * (x - v.x)) + ((y - v.y) * (y - v.y))); }
+    int DistanceSqrt(const Vector2 & v) const {return (((x - v.x) * (x - v.x)) + ((y - v.y) * (y - v.y))); }
     
     float Length() const { return sqrt(x * x + y * y); }
     float LengthSquared() const { return x * x + y * y; }
@@ -167,26 +167,18 @@ void  printMap(multimap<int, Drone*> map)
 
 class Zone
 {
-private:
-
-    
-    int maxDistApproaching = 0;
 
 public:
-    multimap<int, Drone*> mapFoeDroneByDist;
     multimap<int, Drone*> mapFriendDroneByDist;
     multimap<int, Drone*> mapDroneByDist;
-    multimap<int, Drone*> mapFriendAndApprochingDroneByDist;
     
     int id;
     Vector2 pos;
 
     int teamId = -1;
+    int maxDrone;
     
-    int approachingByTeam[4];
     vector<int> nbOfDroneByTeamId = {0,0,0,0};
-    int backUpNeeded = -1;
-    float moveValue = -1;
     
 
     Zone(int xValue, int yValue, int idValue) : pos(xValue, yValue), id(idValue){}
@@ -198,24 +190,18 @@ public:
     
     void ReInit(int tid) // each turn
     {
-        memset(approachingByTeam, 0, sizeof approachingByTeam);
-        maxDistApproaching = 0;
-        moveValue = -1;
         nbOfDroneByTeamId = {0,0,0,0};
         teamId = tid;
-        mapFriendAndApprochingDroneByDist.clear();
         setNearestDrone();
+        maxDrone = 0;
     }
     
     void CheckIfAproaching(Drone &d, Vector2 newpPos) 
     {
         if (IntersectionRayCircle(d.pos, newpPos - d.pos, pos, 99))
         {
-            int distance;
-            if ((distance= pos.Distance(d.pos)) > maxDistApproaching)
-                maxDistApproaching = distance;
-            approachingByTeam[d.teamId]++;
-            mapFriendAndApprochingDroneByDist.insert(pair<int, Drone*>(distance, &d));
+            if (d.targetId == -1 || d.pos.DistanceSqrt(zone[d.targetId]->pos) > d.pos.DistanceSqrt(pos))
+                d.targetId = id;
         }
     }
 
@@ -241,20 +227,20 @@ public:
     void setNearestDrone() // rewriute too use the vectorToMultimap function (duplication!!)
     {
         mapDroneByDist.clear();
-        mapFriendAndApprochingDroneByDist.clear();
-        mapFoeDroneByDist.clear();
         for (int i = 0; i < 4; i++)
         {
             for(Drone &d : drone[i])
             {
-                mapDroneByDist.insert(pair<int, Drone*>(pos.Distance(d.pos), &d));
+                int distance = pos.Distance(d.pos);
+                mapDroneByDist.insert(pair<int, Drone*>(distance - ((d.teamId == ID) ? 1 : 0), &d));
                 if (d.teamId == ID)
+                    mapFriendDroneByDist.insert(pair<int, Drone*>(distance, &d));
+                if (distance < 100)
                 {
-                    mapFriendAndApprochingDroneByDist.insert(pair<int, Drone*>(pos.Distance(d.pos), &d));
-                    mapFriendDroneByDist.insert(pair<int, Drone*>(pos.Distance(d.pos), &d));
+                    nbOfDroneByTeamId[d.teamId]++;
+                    if (maxDrone < nbOfDroneByTeamId[d.teamId])
+                        maxDrone = nbOfDroneByTeamId[d.teamId];
                 }
-                else
-                    mapFoeDroneByDist.insert(pair<int, Drone*>(pos.Distance(d.pos), &d));
             }
         }
     }
@@ -294,121 +280,36 @@ public:
         }
         return max;
     }
-    
-    int  calcFoeBackUpUsingMap(multimap<int, Drone*> map)
+
+    int SimulateTeam(const multimap<int, Drone*> &map, int limitFriend, int &addDist)
     {
         int actualOwner = teamId;
-        bool OwnerJustchange = false;
-        bool tryingTooReturn = false;
-        int renfortneeded = 0;
-        int nbFoeByTeam[4] = {0,0,0,0};
-        int max = 0;
-        int maxFoe = 0;
-        for (const pair<int, Drone*> &p : map)
-        {
-            Drone *d = p.second;
-            
-            if (d->getReserved() && d->targetId != id)
-                continue ;
-
-            nbFoeByTeam[d->teamId]++;
-             OwnerJustchange = false;
-
-            if (max < nbFoeByTeam[d->teamId])
-            {
-                max = nbFoeByTeam[d->teamId];
-                if (d->teamId)
-                    maxFoe = max;
-                if (p.first > 99)
-                {
-                    if (actualOwner != d->teamId)
-                        OwnerJustchange = true;
-                        
-                    actualOwner = d->teamId;
-                    
-                    if (OwnerJustchange && ID == d->teamId)
-                        renfortneeded = max;
-                }
-                else if (d->teamId != ID)
-                    renfortneeded = maxFoe + ((actualOwner == ID) ? 0 : 1);
-            }
-            if (actualOwner == ID && p.first >= maxDistApproaching)
-            {
-                if (calcFoeInDist(p.first + 200) == maxFoe)
-                    return renfortneeded - approachingByTeam[ID];
-            }
-        }
-        return renfortneeded - approachingByTeam[ID];
-    }
-    
-
-
-    int SimulateTeam(const multimap<int, Drone*> &map, int limitFriend)
-    {
-        int actualOwner = teamId;
+        int pre99VirtualOwner = teamId;
         int nbFoeByTeam[4] = {0,0,0,0};
         int max = 0;
         for (const pair<int, Drone*> &p : map)
         {
             Drone *d = p.second;
-            // cerr << "team: " << d->teamId << " targetId: " << d->targetId << endl;
             if (d->teamId == ID && d->targetId != id)
                 continue ;
+            if (nbFoeByTeam[ID] >= limitFriend && p.first > 99 && d->targetId != id)
+                continue ;
             nbFoeByTeam[d->teamId]++;
+            if (d->teamId == ID)
+                addDist += p.first;
 
             if (max < nbFoeByTeam[d->teamId])
             {
                 max = nbFoeByTeam[d->teamId];
                 if (p.first > 99)
                     actualOwner = d->teamId;
+                else
+                    pre99VirtualOwner = d->teamId;
             }
-            if (p.first > 99 && nbFoeByTeam[ID] >= limitFriend)
-                break ;
         }
-        // cerr << endl << endl;
+        if (max > nbFoeByTeam[actualOwner])
+            actualOwner = pre99VirtualOwner;
         return actualOwner;
-    }
-    
-    bool EvaluateMove(bool calcFoeBackup) try
-    {
-            
-        setNearestFriendDrone();
-        
-        backUpNeeded = calcFoeBackUpUsingMap(mapDroneByDist);
-        
-        if (backUpNeeded > 0)
-        {
-            float maxDist = getDistInMapDroneByIndex(backUpNeeded, mapDroneByDist);
-            moveValue = 100000 - backUpNeeded * maxDist;
-        }
-        // printMapDroneByDist();
-        cerr  << "id: " << id << " teamId: " << teamId << " backUpNeeded: " << backUpNeeded << " Friend approaching: " << approachingByTeam[ID] << " calcFoeBackup: " << calcFoeBackup << " FREEDRONE " << FREEDRONE << endl;
-        return backUpNeeded > 0 && (FREEDRONE - backUpNeeded) > 0;
-    } catch (const std::exception& e)
-    {
-        cerr << e.what();
-        return -1;
-    }
-    
-    bool MakeMove()
-    {
-        int i = 0;
-        for (multimap<int, Drone*>::iterator p = mapFriendDroneByDist.begin(); p != mapFriendDroneByDist.end(); ++p)
-        {
-            Drone *d = p->second;
-            if (i >= backUpNeeded)
-                break ;
-            if (d->getReserved() == false)
-            {
-                approachingByTeam[ID]++;
-                d->targetId = id;
-                i++;
-                d->target = pos;
-                d->setReservedToTrue();
-            }
-        }
-        cerr << "id: " << id << " teamId: " << teamId << " friend approching: " << approachingByTeam[ID] << " needed: " << backUpNeeded << endl;
-        moveValue = -1;
     }
     
     void setAproaching(int backUpNeeded)
@@ -417,7 +318,6 @@ public:
         for (multimap<int, Drone*>::iterator p = mapFriendDroneByDist.begin(); p != mapFriendDroneByDist.end(); ++p)
         {
             Drone *d = p->second;
-            // cerr << "1team: " << d->teamId << " targetId: " << d->targetId << endl;
             if (i >= backUpNeeded)
                 break ;
             if (d->targetId == -1)
@@ -445,6 +345,7 @@ public:
     int totalDroneLeft[4];
     int nbTarget= 0;
     int score = 0;
+    float averageDistance = 0;
     
     Possibility()
     {
@@ -506,6 +407,7 @@ void setTargetToTargetId()
 {
     for (Drone &d : drone[ID])
     {
+        d.setReservedToTrue();
         d.target = zone[d.targetId]->pos;
     }
 }
@@ -528,33 +430,15 @@ void BruteForceInitQueue()
             for (int k = 0; 0 <= originalPossibility.totalDroneLeft[ID]; k++)
             {
                 originalPossibility.zoneBackup[i][ID] = k;
-                // originalPossibility.totalDroneLeft[1] = notComplete.front().totalDroneLeft[1];
-                // for (int l = 0; 0 <= originalPossibility.totalDroneLeft[1]; l++)
-                // {
-                //     originalPossibility.zoneBackup[i][1] = l;
-                //     originalPossibility.totalDroneLeft[2] = notComplete.front().totalDroneLeft[2];
-                //     for (int m = 0; 0 <= originalPossibility.totalDroneLeft[2]; m++)
-                //     {
-                //         originalPossibility.zoneBackup[i][2] = m;
-                //         originalPossibility.totalDroneLeft[3] = notComplete.front().totalDroneLeft[3];
-                //         for (int n = 0; 0 <= originalPossibility.totalDroneLeft[3]; n++)
-                //         {
-                //             originalPossibility.zoneBackup[i][3] = n;
                             
-                            Possibility newPossibility = originalPossibility;
-                            if (newPossibility.IsComplete())
-                                possibilityList.push_back(originalPossibility);
-                            else
-                                notComplete.push_back(newPossibility);
-                //             originalPossibility.totalDroneLeft[3]--; 
-                //         }
-                //         originalPossibility.totalDroneLeft[2]--; 
-                //     }
-                //     originalPossibility.totalDroneLeft[1]--; 
-                // }
+                Possibility newPossibility = originalPossibility;
+                if (newPossibility.IsComplete())
+                    possibilityList.push_back(originalPossibility);
+                else
+                    notComplete.push_back(newPossibility);
+                    
                 originalPossibility.totalDroneLeft[ID]--; 
             }
-            // originalPossibility.CalcAlliedMoveHash();
             notComplete.pop_front();
         }
         cerr << i << " " << possibilityList.size() << endl;
@@ -562,6 +446,7 @@ void BruteForceInitQueue()
     for (Possibility &p: possibilityList)
         p.CalcNbTarget();
      cerr << possibilityList.size() << endl;
+    // showl(possibilityList);
 
 }
 
@@ -574,42 +459,23 @@ void SetTargetidForPossibility(Possibility & p)
         z->setAproaching(p.zoneBackup[z->id][ID]);
 }
 
-bool lol = false;
 
-int TestFriendPossibility(Possibility & testing) // we searche the worst case scenario (vector iterate opti ?)
+float TestFriendPossibility(Possibility & testing) // we searche the worst case scenario (vector iterate opti ?)
 {
-    // int scoreFinale = 99999;
     
-    
-    // vector<multimap<int, Drone*>> friendMap;
-    // friendMap.resize(Z);
-    // for (int i = 0; i < D; i++)
-    //      friendMap[testing.droneCible[i]].insert(pair<int, Drone*>(zone[testing.droneCible[i]].pos.Distance(testing.drone[i]->pos), testing.drone[i]));
-    
-    
-    // for (Possibility & foeTesting : foePossibilityList)
-    // {
-    //     int score = 0;
-       
-    //     vector<multimap<int, Drone*>> map = friendMap;
-
-    //     int size = D * (P - 1);
-    //     for (int i = 0; i < size; i++)
-    //         map[foeTesting.droneCible[i]].insert(pair<int, Drone*>(zone[i].pos.Distance(foeTesting.drone[i]->pos), foeTesting.drone[i]));
-            
-    //     for (Zone &z : zone)
-    //         score += (int)(z.SimulateTeam(map[z.id]) == ID);
-
-    //     if (score < scoreFinale)
-    //         scoreFinale = score;
-    // }
-    // testing.score = scoreFinale;
-    
-    int score = 0;
+    float score = 0;
+    int averageDistance = 0;
     SetTargetidForPossibility(testing);
                   
     for (Zone *z : zone)
-        score += (int)(z->SimulateTeam(z->mapDroneByDist, testing.zoneBackup[z->id][ID]) == ID);
+    {
+        int result = (int)(z->SimulateTeam(z->mapDroneByDist, testing.zoneBackup[z->id][ID], averageDistance) == ID);
+        score += result;
+        if (result == 0 && z->maxDrone < z->nbOfDroneByTeamId[ID] + testing.zoneBackup[z->id][ID])
+            score += 0.1f;
+    }
+        
+    testing.averageDistance = averageDistance / D;
 
     testing.score = score;
     return score;
@@ -617,54 +483,40 @@ int TestFriendPossibility(Possibility & testing) // we searche the worst case sc
 
 void BruteForce()
 {
-    lol = false;
-    // SearchBestMove
-    
-    Possibility *best = &possibilityList.front();
     int i = 0;
+    Possibility *best = &possibilityList.front();
     cerr << possibilityList.size() << endl;
     TestFriendPossibility(*best); // opti duplicate
-    setTargetToTargetId();
-    // showq(friendPossibilityList);
+    if (best->score >= Z / P)
+        setTargetToTargetId();
+        
     for (Possibility &testing : possibilityList)
     {
         TestFriendPossibility(testing);
-        if (testing.score > best->score || (testing.score == best->score && testing.nbTarget > best->nbTarget))
+        if (i == 0)
+            testing.nbTarget = 20000;
+        if (testing.score > best->score || (testing.score == best->score && (testing.nbTarget > best->nbTarget || (testing.nbTarget == best->nbTarget && testing.averageDistance < best->averageDistance))))
         {
+            cerr << "score: " << best->score << " nbTarget: " << best->nbTarget << " cible: " << best->Debug() << endl;
             best = &testing;
-            setTargetToTargetId();
+            if (testing.score >= Z / P)
+                setTargetToTargetId();
         }
-        // cerr << "score: " << testing.score << " cible: " << testing.Debug() << endl;
-    }
-    
-    //Setup BestMove
-    
-    cerr << "score: " << best->score << " cible: " << best->Debug() << endl;
-
-}
-
-
-
-void EvaluateAllZone(bool checkingFooBackup = false)
-{
-    bool moveLeft = true;
-    
-    while(moveLeft)
-    {
-        moveLeft = false;
-        Zone *bestZone = NULL;
-        for(Zone *z : zone)
+        i++;
+        if (chrono::steady_clock::now() > maxTime)
         {
-            if (z->EvaluateMove(checkingFooBackup))
-            {
-                moveLeft = true;
-                if (!bestZone || z->moveValue > bestZone->moveValue)
-                    bestZone = z;
-            }
+            cerr << " Not enought time nb Possibility tested: " << i << endl;
+            break ;
         }
-        if (bestZone)
-            bestZone->MakeMove();
     }
+    
+    cerr << "score: " << best->score << " nbTarget: " << best->nbTarget << " cible: " << best->Debug() << endl;
+    // setting the best at the front of the list too give him some priority
+    Possibility tmp = *best;
+    *best = possibilityList.front();
+    possibilityList.front() = tmp;
+    
+
 }
 
 
@@ -707,6 +559,8 @@ int main()
     // game loop
     while (1) {
         
+        maxTime = std::chrono::steady_clock::now() + chrono::milliseconds(95);
+        
         FREEDRONE = D;
         
         for (int i = 0; i < Z; i++) // init zone
@@ -738,7 +592,27 @@ int main()
         
         
         BruteForce();
-       
+        
+        
+        cerr << "assign do nothing" << endl;
+        
+        for(Drone &d : drone[ID]) // asign a target to drone who do nothing
+        {
+            if (d.getReserved() == false)
+            {
+                d.setReservedToTrue();
+                Zone *zNear = NULL;
+                for (Zone *z : zone)
+                {
+                    if (z->teamId != ID && (!zNear || z->pos.Distance(d.pos) < zNear->pos.Distance(d.pos)))
+                        zNear = z;
+                }
+                if (zNear)
+                    d.target = zNear->pos;
+                else
+                    d.target = centerOfAllZone;
+            }
+        }
         cerr << "finish" << endl;
             
         for (int i = 0; i < D; i++) // moving drone
